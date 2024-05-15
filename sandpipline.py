@@ -76,7 +76,7 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None):
     
     # To get centroids
     from distortionMaps import d2cMapping
-    from funcs import point_source_centroiding
+    from funcs_sand import point_source_centroiding
 
     # To get bad pixels flags
     from jwst.datamodels import dqflags
