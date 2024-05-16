@@ -29,7 +29,7 @@ This file contain functions for each step of the creation of Spline fittinf :
     5bis - re_scale_slice : Sub-function used by (5), to rescale one slice given fitting window
 
 Finally, few function at the end aim at assesing the point cloud quality : 
-    
+v    
     1 - Print the model relative to the cloud point
     
     Nearest neighbor analysis: Compute the disparity of nerby points 
@@ -42,6 +42,10 @@ Finally, few function at the end aim at assesing the point cloud quality :
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
+
+# log10 raises warning when ther is a negative value.
+# It return Nan's for thoses points and that is what we want
+np.seterr(invalid='ignore') # We do no want the warning tho, it is enoying
 
 
 a_to_pix = 0.196 # Value used to convert alpha shift into pixel displacement
@@ -68,7 +72,7 @@ def get_spec_grid(d2cMaps):
     return [lambcens,lambfwhms]
 
 
-def get_all_rate_file_at_path(path, cdpDir, save_pickle=None):
+def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None):
     
     # File managment
     from glob import glob
@@ -90,9 +94,14 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None):
     bandCHAN  = []
     
     if not glob(path+"/*_rate.fits") :
-        raise "No rate files found matching path : "+path+"/*_rate.fits"
+        raise FileNotFoundError("No rate files found matching path : "+path+"/*_rate.fits")
 
-    
+    if bkg:
+        bkg_hdul=[]
+        for bkgfile in glob(bkg+"/*_rate.fits"):
+            hdul = fits.open(bkgfile)
+            bkg_hdul.append(hdul)
+
     for file in glob(path+"/*_rate.fits"):
         
     
@@ -109,8 +118,9 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None):
         
         # Read the band from the header
         band = band_id[hdul[0].header["BAND"]]
-        band_left = hdul[0].header["CHANNEL"][0]+band
-        band_right = hdul[0].header["CHANNEL"][1]+band
+        channel = hdul[0].header["CHANNEL"]
+        band_left = channel[0]+band
+        band_right = channel[1]+band
         
         # Create the mapping FOR BOTH CHANNEL
         d2cMaps_left = d2cMapping(band_left,cdpDir,slice_transmission='80pc',fileversion = "flt5")
@@ -126,6 +136,16 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None):
         mask_non_science = (np.bitwise_and(dq, NON_SCIENCE) == NON_SCIENCE)
     
         frame[np.where(mask_bad+mask_non_science)]=np.nan
+                
+        if bkg : 
+            found_bkg=True
+            for bkg_i in bkg_hdul:
+                if bkg_hdul[0].header["BAND"] == band and \
+                   bkg_hdul[0].header["CHANNEL"]  == channel:
+                       frame = frame-bkg_hdul[3].data
+            if not found_bkg :    
+                print("Not matching bkg. -- No backround subtraction on "+file)
+                    
         
         # Append frame
         cube_frame.append( frame )
@@ -206,7 +226,7 @@ def select_dither_type(type_i, cube_frame, centers, dith_type, numdi_list, best_
     centers_lists_type_i = np.array(centers_lists_type_i)
     
     if not cube_frame_type_i.size :
-        raise "No matching type, required type is : "+type_i
+        raise RuntimeError("No matching type, required type is : "+type_i)
 
     return cube_frame_type_i, centers_lists_type_i, numdi_list_type_i
  
@@ -235,7 +255,7 @@ def select_dither_band(band_sci, cube_frame, centers, dith_type, numdi_list, ban
     dith_band_i = np.array(dith_band_i)
 
     if not cube_frame_band_i.size :
-        raise "No matching band, required type is : "+band_sci
+        raise RuntimeError("No matching band, required type is : "+band_sci)
 
     return cube_frame_band_i, centers_lists_band_i, numdi_list_band_i, dith_band_i
 
@@ -315,8 +335,12 @@ def remove_outliers(x_coors, y_coors, nb_neighb=15, std_ratio=2):
     return new_x_coors, new_y_coors
 
 def set_weights(x_coors, nb_neighb=20, std_ratio=3, show=False):
-    """ Create weights array (size of x_coors) to deal with outliers based on their 
-    standard deviation relative to the close neighborhood."""
+    """ Create weights array (size of x_coors) 
+    1 - to deal with outliers based on their 
+    standard deviation relative to the close neighborhood.
+    2 - To add more weigt to the peaks because it is often not well fitted
+    
+    """
         
     # If the non-nan x_coors are inferior to the nb_neighb
     if len(x_coors)<nb_neighb:
@@ -326,6 +350,7 @@ def set_weights(x_coors, nb_neighb=20, std_ratio=3, show=False):
     nb_neighb = nb_neighb//2
     weigths = []
     idx_bad_neib = []
+    highest_peaks=np.percentile(x_coors, 99.9)
     
     # For each value of x_coors (we do not considere edges)
     for ii in range(0, len(x_coors)):
@@ -344,7 +369,9 @@ def set_weights(x_coors, nb_neighb=20, std_ratio=3, show=False):
                             (x_coors[ii] > mean_neighb - std_ratio*std_neighb)
                     
         # Weight the candidate accordingly
-        if is_good_neighbor == True: 
+        if x_coors[ii] > highest_peaks :
+            weigths.append(1.1)
+        elif is_good_neighbor == True: 
             weigths.append(1.)
         else:
             weigths.append( 0. )
@@ -440,7 +467,7 @@ def create_spline_cube(cube_frame, centers_lists, center_sci, s=10, k=5, show_sl
             print("Model set to f(x)=Nan.")
             splin = lambda x: np.nan
         else:
-            if slicey==2: print(slicey)
+
             # Compute the fuction spline(x) = y, to model the row curve
             splin = UnivariateSpline(x_slice_row_i_sorted_unique,
                                       logslice_sorted_unique, 
