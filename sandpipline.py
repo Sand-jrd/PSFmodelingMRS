@@ -57,7 +57,27 @@ colors_type = {'NEGATIVE1':"tab:orange", 'NEGATIVE2':"tab:blue", 'NEGATIVE3':"ta
 
 colors = ["tab:orange","tab:blue","tab:green","tab:purple","tab:red","blue", "tab:pink", "pink", "orange", "tab:orange","tab:blue","tab:green","tab:purple","tab:red","blue", "tab:pink", "pink", "orange"]
 
+# %% Two little function to generate a pdf pages containing useful plot
 
+def flush_current_figs():
+    from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.pyplot as plt
+    
+    plt.clf()
+    plt.cla()
+    plt.close("all")
+
+
+def multipage(filename, figs=None, dpi=200):
+    from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.pyplot as plt
+
+    pp = PdfPages(filename)
+    if figs is None:
+        figs = [plt.figure(n) for n in plt.get_fignums()]
+    for fig in figs:
+        fig.savefig(pp, format='pdf')
+    pp.close()
 
 # %% 
 
@@ -72,7 +92,7 @@ def get_spec_grid(d2cMaps):
     return [lambcens,lambfwhms]
 
 
-def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None):
+def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None, plot_and_save=True):
     
     # File managment
     from glob import glob
@@ -155,10 +175,10 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None):
         
         # Left centorids
         centroid_2d = point_source_centroiding(band_left,frame,d2cMaps_left,spec_grid=get_spec_grid(d2cMaps_left), fit='2D')
-        _ ,alpha_centers,beta_centers,_ ,_ ,_  = centroid_2d
+        _ ,alpha_centers_l,beta_centers_l,_ ,_ ,_  = centroid_2d
         
-        shiftx_l = np.mean(alpha_centers[~np.isnan(alpha_centers)])/a_to_pix
-        shifty_l = np.mean(beta_centers[~np.isnan(beta_centers)])/a_to_pix
+        shiftx_l = np.mean(alpha_centers_l[~np.isnan(alpha_centers_l)])/a_to_pix
+        shifty_l = np.mean(beta_centers_l[~np.isnan(beta_centers_l)])/a_to_pix
 
         #---- I update the point_source_centroiding, so if the gauss fit fail it return the argmax.
         # If you are using the version that can return Nan, then uncomment these lines. (same for right centrodds)
@@ -167,10 +187,10 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None):
 
         # Right centorids
         centroid_2d = point_source_centroiding(band_right,frame,d2cMaps_right,spec_grid=get_spec_grid(d2cMaps_right), fit='2D')
-        _ ,alpha_centers,beta_centers,_ ,_ ,_  = centroid_2d
+        _ ,alpha_centers_r,beta_centers_r,_ ,_ ,_  = centroid_2d
         
-        shiftx_r = np.mean(alpha_centers[~np.isnan(alpha_centers)])/a_to_pix
-        shifty_r = np.mean(beta_centers[~np.isnan(beta_centers)])/a_to_pix
+        shiftx_r = np.mean(alpha_centers_r[~np.isnan(alpha_centers_r)])/a_to_pix
+        shifty_r = np.mean(beta_centers_r[~np.isnan(beta_centers_r)])/a_to_pix
     
         # if np.isnan(shiftx_r): shiftx_r=0 # If shifty_l is empty replace with 0
         # if np.isnan(shifty_r): shifty_r=0
@@ -178,7 +198,7 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None):
     
         # Store it in 2x2 tuple
         centers.append( ((shiftx_l,shifty_l), 
-                          (shiftx_r,shifty_r)) )
+                          (-shiftx_r,-shifty_r)) )
         
         
         ## -- Append other file infos to be return
@@ -189,8 +209,68 @@ def get_all_rate_file_at_path(path, cdpDir, save_pickle=None, bkg=None):
         name_list.append(name)
         bandCHAN.append(band+hdul[0].header["CHANNEL"])
         
+        if plot_and_save:
+            
+            plt.figure(file)
+            sliceI= np.log10(1+frame[512])
+        
+            sliceI_l = sliceI[:512]
+            max_gauss_l = np.nanargmax(sliceI_l)
+            maxmin= [-1,np.nanmax(1.2*sliceI_l)]
+            
+            start_slice = max_gauss_l-20 + np.nanargmin(d2cMaps_left["alphaMap"][512][max_gauss_l-20:max_gauss_l])
+            end_slice = max_gauss_l +1+ np.nanargmax(d2cMaps_left["alphaMap"][512][max_gauss_l:max_gauss_l+20])
+
+            max_gauss_l_alpha = start_slice+np.nanargmin(abs(d2cMaps_left["alphaMap"][512][start_slice:end_slice]))
+
+            plt.subplot(221)
+            plt.title("Estimated centroïd - left")
+            plt.xlim([max_gauss_l_alpha-10, max_gauss_l_alpha+10])
+            plt.ylim(maxmin)
+            plt.plot(sliceI_l, color="tab:orange")
+            plt.plot([max_gauss_l_alpha+shiftx_l, max_gauss_l_alpha+shiftx_l], maxmin, color="tab:blue")
+            plt.fill_between([max_gauss_l_alpha+shiftx_l-0.5, max_gauss_l_alpha+shiftx_l+0.5],[maxmin[0],maxmin[0]],[maxmin[1],maxmin[1]],alpha=0.5,color="tab:blue", label="centoïd +10.5pix")
+
+            plt.plot(sliceI, label="Slice 512")
+            
+            plt.subplot(222)
+            sliceI_r = sliceI[512:]
+            max_gauss_r = 512+np.nanargmax(sliceI_r)
+            maxmin= [-1,np.nanmax(1.2*sliceI_r)]
+            
+            start_slice = max_gauss_r-20 + np.nanargmax(d2cMaps_right["alphaMap"][512][max_gauss_r-20:max_gauss_r])
+            end_slice = max_gauss_r +1+ np.nanargmin(d2cMaps_right["alphaMap"][512][max_gauss_r:max_gauss_r+20])
+
+            max_gauss_r_alpha = start_slice+np.nanargmin(abs(d2cMaps_right["alphaMap"][512][start_slice:end_slice]))
+
+            plt.title("Estimated centroïd - left")
+            plt.xlim([max_gauss_r_alpha-10, max_gauss_r_alpha+10])
+            plt.ylim(maxmin)
+            plt.plot(sliceI, color="tab:orange")
+            #plt.plot([max_gauss_r_alpha+shiftx_r, max_gauss_r_alpha+shiftx_r], maxmin, color="tab:blue", label="Applaying + shiftx")
+            #plt.plot([max_gauss_r_alpha, max_gauss_r_alpha], maxmin, color="tab:red", label="AlphaMAP 0")
+            plt.plot([max_gauss_r_alpha-shiftx_r, max_gauss_r_alpha-shiftx_r], maxmin, color="tab:green", label="Applaying - shiftx")
+            #plt.fill_between([max_gauss_r_alpha+shiftx_r-0.5, max_gauss_r_alpha+shiftx_r+0.5],[maxmin[0],maxmin[0]],[maxmin[1],maxmin[1]],alpha=0.5, color="tab:blue")
+            plt.fill_between([max_gauss_r_alpha-shiftx_r-0.5, max_gauss_r_alpha-shiftx_r+0.5],[maxmin[0],maxmin[0]],[maxmin[1],maxmin[1]],alpha=0.5, color="tab:green")
+            plt.subplot(223)
+            
+            plt.title("Bin estimate of alpha_centers - Left")
+            plt.plot(alpha_centers_l[~np.isnan(alpha_centers_l)]/a_to_pix)
+            plt.plot([shiftx_l]*len(alpha_centers_l[~np.isnan(alpha_centers_l)]/a_to_pix))
+            plt.ylim([shiftx_l+0.5, shiftx_l-0.5])
+
+            plt.subplot(224)
+            plt.title("Bin estimate of alpha_centers - Right")
+            plt.plot(alpha_centers_r[~np.isnan(alpha_centers_r)]/a_to_pix)
+            plt.plot([shiftx_r]*len(alpha_centers_r[~np.isnan(alpha_centers_r)]/a_to_pix))
+            plt.ylim([shiftx_r+0.5, shiftx_r-0.5])
+
+
     dith_type = np.array(dith_type)
 
+    multipage(path+".pdf")
+    flush_current_figs()
+    
     if save_pickle is not None: 
         with open(save_pickle, 'wb') as handle:
             pickle.dump((cube_frame, centers, 
@@ -370,7 +450,7 @@ def set_weights(x_coors, nb_neighb=20, std_ratio=3, show=False):
                     
         # Weight the candidate accordingly
         if x_coors[ii] > highest_peaks :
-            weigths.append(1.1)
+            weigths.append(2)
         elif is_good_neighbor == True: 
             weigths.append(1.)
         else:
@@ -647,7 +727,7 @@ def re_scale_and_shift_slice(slice_dest, spline, fitting_window=None, x0=[1, 0, 
 
 # %% Metrics and vizualization function
 
-def show_data_point(cube_frame, centers_list, numdi_list, slicey=512, xlim=None, chose_1color=None, new_figure=True):
+def show_data_point(cube_frame, centers_list, numdi_list, slicey=512, xlim=None, chose_1color=None, form="+", new_figure=True):
     
     """ Plot a data point """
 
@@ -671,15 +751,16 @@ def show_data_point(cube_frame, centers_list, numdi_list, slicey=512, xlim=None,
         x_axis_shifted = np.concatenate( (x_axis_shifted_left,x_axis_shifted_right) )
         
         if isinstance(numdi_list, list or tuple) or kk==0:
-            plt.plot(x_axis_shifted, slice_i, "+", color=color, label=label)
+            plt.plot(x_axis_shifted, slice_i, form, color=color, label=label, alpha=0.8)
 
         else:
             # To avoid repeting labels if they all have the same 
-            plt.plot(x_axis_shifted, slice_i, "+", color=color)
+            plt.plot(x_axis_shifted, slice_i, form, color=color, alpha=0.8)
         plt.plot(x_axis_shifted, slice_i, "-", color=color, alpha=0.1)
         
     plt.legend()
     plt.xlim(xlim)
+
     plt.yscale('log')
         
 def plot_dither_slice_by_postion(cube_frame, centers_lists, show=False):
@@ -702,27 +783,6 @@ def plot_dither_slice_by_postion(cube_frame, centers_lists, show=False):
     show_data_point( cube_frame[idc[3:6], :, :], centers_lists[idc[3:6]], "row 2",  chose_1color=colors[1], new_figure=False)
     show_data_point( cube_frame[idc[6:], :, :], centers_lists[idc[6:]], "row 3",  chose_1color=colors[2], new_figure=False)
 
-# %% Two little function to generate a pdf pages containing useful plot
-
-def flush_current_figs():
-    from matplotlib.backends.backend_pdf import PdfPages
-    import matplotlib.pyplot as plt
-    
-    plt.clf()
-    plt.cla()
-    plt.close("all")
-
-
-def multipage(filename, figs=None, dpi=200):
-    from matplotlib.backends.backend_pdf import PdfPages
-    import matplotlib.pyplot as plt
-
-    pp = PdfPages(filename)
-    if figs is None:
-        figs = [plt.figure(n) for n in plt.get_fignums()]
-    for fig in figs:
-        fig.savefig(pp, format='pdf')
-    pp.close()
 
 # %% Can be use to have an interactive plot with a slider. Copy past in main .py file to use
 # Not as function because it would required a little trick to not loose handle with the slider,
